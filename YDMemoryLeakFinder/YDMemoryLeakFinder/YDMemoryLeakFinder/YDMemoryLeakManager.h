@@ -10,7 +10,7 @@
 #import <UIKit/UIKit.h>
 NS_ASSUME_NONNULL_BEGIN
 
-@interface YDMemoryLeakManager : NSObject<UITableViewDelegate,UITableViewDataSource>
+@interface YDMemoryLeakManager : NSObject
 @property(strong,nonatomic)NSMutableSet *ignores;
 +(instancetype)YDFunc(shared);
 @end

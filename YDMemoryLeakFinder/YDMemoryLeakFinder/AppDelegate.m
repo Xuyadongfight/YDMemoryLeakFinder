@@ -6,6 +6,7 @@
 //
 
 #import "AppDelegate.h"
+#import "ZFBugFix.h"
 
 @interface AppDelegate ()
 
@@ -15,6 +16,7 @@
 
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    [ZFBugFix fix];
     return YES;
 }
 

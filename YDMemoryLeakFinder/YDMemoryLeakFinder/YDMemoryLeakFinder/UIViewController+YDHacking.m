@@ -31,13 +31,25 @@
     });
 }
 - (void)YDFunc(dismissViewControllerAnimated):(BOOL)flag completion:(void (^)(void))completion{
-    if ([self.presentedViewController isKindOfClass:[UIAlertController class]]) {
-        [self YD_dismissViewControllerAnimated:flag completion:completion];
-    }else{
-        [self YD_willDealloc];
-        [self YD_dismissViewControllerAnimated:flag completion:completion];
+    
+//    NSLog(@"self = %@,presented = %@, presenting = %@",self,self.presentedViewController,self.presentingViewController);
+    
+    UIViewController *presentedVC = self;
+    if (self.presentedViewController){
+        presentedVC = self.presentedViewController;
     }
+        
+    [presentedVC YD_willDealloc];
+    [self YD_dismissViewControllerAnimated:flag completion:completion];
+//
+//    if ([self.presentedViewController isKindOfClass:[UIAlertController class]]) {
+//        [self YD_dismissViewControllerAnimated:flag completion:completion];
+//    }else{
+//        [self.presentedViewController YD_willDealloc];
+//        [self YD_dismissViewControllerAnimated:flag completion:completion];
+//    }
 }
+
 @end
 
 #endif

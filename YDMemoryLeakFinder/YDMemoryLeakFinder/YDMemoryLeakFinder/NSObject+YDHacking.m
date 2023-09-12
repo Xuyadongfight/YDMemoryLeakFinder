@@ -10,20 +10,19 @@
 #import "YDMemoryLeakManager.h"
 #import <objc/runtime.h>
 #import "YDTableView.h"
+#import "NSObject+YDRuntime.h"
 
 #define YD_FreeArr(x) if(x != NULL){free(x);x = NULL;}
 
-int *indexptr;
-void*arrPropertyName;
-void*arrIvarName;
-void*arrCheckName;
-void*arrNoCheckName;
-void*checkView;
+
+
+UIView*checkView;
+NSMutableArray *propertys;
 
 @implementation NSObject (YDHacking)
 - (void)YDFunc(willDealloc){
     __weak typeof(self)weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC) , dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC) , dispatch_get_main_queue(), ^{
         [weakSelf YD_HaveLeak];
     });
 }
@@ -44,7 +43,7 @@ void*checkView;
     UIAlertController *altVC = [UIAlertController alertControllerWithTitle:@"内存泄漏" message:[NSString stringWithFormat:@"%@",self] preferredStyle:UIAlertControllerStyleAlert];
     __weak typeof(self)weakSelf = self;
     [altVC addAction:[UIAlertAction actionWithTitle:@"检测" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        [weakSelf YD_CheckMemoryLeakProperty];
+        [weakSelf YD_CheckMemoryLeak];
     }]];
     [altVC addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
         
@@ -57,218 +56,165 @@ void*checkView;
     [[self YD_getCurrentVC] presentViewController:altVC animated:true completion:nil];
 }
 
-
-
--(void)YDFunc(CheckMemoryLeakProperty){
-    if(indexptr){
-        *indexptr = 0;
-    }
-    unsigned int propertyCount = 0;
-    objc_property_t *propertyList = class_copyPropertyList([self class], &propertyCount);
+-(void)YDFunc(CheckMemoryLeak){
+    NSPointerArray *ivars = [[self class] YDIvars];
+    NSPointerArray *pros = [[self class] YDProperties];
+    NSPointerArray *methods = [[self class] YDMethods];
     
-    NSMutableArray *propertyNames = [[NSMutableArray alloc] init];
-    for (int i = 0; i< propertyCount;i++){
-        objc_property_t property = propertyList[i];
-        [propertyNames addObject:[NSString stringWithUTF8String:property_getName(property)]];
+    NSMutableArray *ivarDics = [[NSMutableArray alloc] init];
+    for(int i = 0;i < ivars.count;i++){
+        NSString *name = [NSString stringWithUTF8String:((YDIvar*)[ivars pointerAtIndex:i])->name];
+        NSString *type = [NSString stringWithUTF8String:((YDIvar*)[ivars pointerAtIndex:i])->type];
+        [ivarDics addObject:@{@"name":name,@"type":type}];
     }
-    NSMutableSet *propertyNameSet = [NSMutableSet setWithArray:propertyNames];
-    if (arrPropertyName != NULL){
-        free(arrPropertyName);
-        arrPropertyName = NULL;
-    }
-    YD_FreeArr(arrPropertyName);
-    arrPropertyName = (__bridge_retained void*)propertyNames;
     
-    unsigned int ivarCount = 0;
-    Ivar* ivars = class_copyIvarList([self class], &ivarCount);
-    NSMutableArray *ivarNames = [[NSMutableArray alloc] init];
-    for (int i = 0; i< ivarCount;i++){
-        Ivar ivar = ivars[i];
-        NSString *ivarType = [NSString stringWithUTF8String:ivar_getTypeEncoding(ivar)];
-        NSString * ivarName = [NSString stringWithUTF8String:ivar_getName(ivar)];
-        if ([[ivarName substringToIndex:1] isEqualToString:@"_"]){
-            [ivarNames addObject:[ivarName substringFromIndex:1]];
+    NSMutableArray *proDics = [[NSMutableArray alloc] init];
+    for(int i = 0;i < pros.count;i++){
+        NSString *name = [NSString stringWithUTF8String:((YDProperty*)[pros pointerAtIndex:i])->name];
+        NSString *type = [NSString stringWithUTF8String:((YDProperty*)[pros pointerAtIndex:i])->attributes];
+        [proDics addObject:@{@"name":name,@"type":type}];
+    }
+    
+    NSMutableArray *methodDics = [[NSMutableArray alloc] init];
+    for(int i = 0;i < methods.count;i++){
+        NSString *name = [NSString stringWithUTF8String:((YDMethod*)[methods pointerAtIndex:i])->name];
+        NSString *type = [NSString stringWithUTF8String:((YDMethod*)[methods pointerAtIndex:i])->typeEncoding];
+        [methodDics addObject:@{@"name":name,@"type":type}];
+    }
+    
+    NSMutableArray*proAllNames = [[NSMutableArray alloc] init];//所有属性
+    NSMutableArray*proRefNames = [[NSMutableArray alloc] init];//所有对象类型属性
+    NSMutableArray*proNoRefNames = [[NSMutableArray alloc] init];//所有非对象类型属性
+    
+    for (int i = 0;i<proDics.count;i++){
+        NSDictionary *proDic = proDics[i];
+        NSString *proName = proDic[@"name"];
+        NSString *proType = proDic[@"type"];
+        [proAllNames addObject:proName];
+        //筛选出对象属性
+        if ([self isClassProperty:proType]){
+            [proRefNames addObject:proName];
         }else{
-            [ivarNames addObject:ivarName];
+            [proNoRefNames addObject:proName];
         }
-        NSLog(@"ivarType = %@ , ivarName = %@",ivarType,ivarName);
     }
-    NSMutableSet *ivarNameSet = [NSMutableSet setWithArray:ivarNames];
+    
+    NSMutableArray *ivarAllNames = [[NSMutableArray alloc] init];//所有成员变量
+    NSMutableArray *ivarRefNames = [[NSMutableArray alloc] init];//对象类型成员变量
+    NSMutableArray *ivarNoRefNames = [[NSMutableArray alloc] init];//非对象类型或未知类型成员变量
+    
+    for (int i = 0;i<ivarDics.count;i++){
+        NSDictionary *ivarDic = ivarDics[i];
+        NSString *ivarName = ivarDic[@"name"];
+        NSString *ivarType = ivarDic[@"type"];
+        [ivarAllNames addObject:ivarName];
+        //筛选出对象成员变量
+        if ([self isClassIvar:ivarType]){
+            [ivarRefNames addObject:ivarName];
+        }else{
+            [ivarNoRefNames addObject:ivarName];
+        }
+    }
+    
+    NSMutableArray *methodSets = [[NSMutableArray alloc] init];//所有set方法
+    for (int i = 0; i< methodDics.count;i++){
+        NSDictionary *methodDic = methodDics[i];
+        NSString *methodName = methodDic[@"name"];
+        if ([self isSetMethod:methodName]){
+            [methodSets addObject:methodName];
+        }
+    }
+    
+    NSMutableArray *models = [[NSMutableArray alloc] init];
+    for (int i = 0; i < proAllNames.count;i++){
+        YDTableViewCellModel *model = [[YDTableViewCellModel alloc] init];
+        model.name = proAllNames[i];
+        model.status = unChecked;
+        [models addObject:model];
+    }
+    
+    propertys = models;
+    [self YD_getCheckView];
+    
+    UITableView* tab = [checkView viewWithTag:101];
+    [tab reloadData];
+    
+    for (int i = 0; i < models.count;i++){
+        YDTableViewCellModel *model = models[i];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (i + 1) *NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            [self checkProperty:model.name model:model refPropertyNames:proRefNames setMethods:methodSets];
+            [tab reloadData];
+        });
+        
+    }
+}
 
-    YD_FreeArr(arrIvarName);
-    arrIvarName = (__bridge_retained void*)ivarNames;
-    
-    [ivarNameSet minusSet:propertyNameSet];
-    
-    YD_FreeArr(arrNoCheckName);
-    arrNoCheckName = (__bridge_retained void*)[ivarNameSet allObjects];
-    
-    YD_FreeArr(arrCheckName);
-    arrCheckName =(__bridge_retained void*)[[NSMutableArray alloc] init];
-    
-    if (propertyList && propertyCount>0){
-        UILabel *label = [[self YD_getCheckView] viewWithTag:102];
-        [label setHidden:true];
-        [self YD_checkProerty];
-        return;
+-(void)checkProperty:(NSString *)propertyName model:(YDTableViewCellModel*)model refPropertyNames:(NSArray*)refNames setMethods:(NSArray*)setMethods{
+    if ([refNames containsObject:propertyName]) {//是对象类型
+        NSString *setMethodName = [NSString stringWithFormat:@"set%@%@:",[model.name substringToIndex:1].uppercaseString,[model.name substringFromIndex:1]];
+        if ([setMethods containsObject:setMethodName]) {//有set方法
+            __weak id property = [self valueForKey:propertyName];
+            
+            CFIndex countPre = CFGetRetainCount((__bridge void*)self);
+            if ([property isKindOfClass:[NSTimer class]]) {//对定时器做特殊处理
+                [(NSTimer*)property invalidate];
+            }
+            [self setValue:nil forKey:model.name];
+            CFIndex countAfter = CFGetRetainCount((__bridge void*)self);
+//            NSLog(@"name = %@ pre = %ld after = %ld",propertyName,countPre,countAfter);
+            if (countPre == countAfter) {
+                model.status = checkedOk;
+            }else{
+                model.status = checkError;
+            }
+        }else{
+            model.status = checkedOk; //没有set方法认为是不能强引用的
+        }
     }else{
-        UILabel *lab = [[self YD_getCheckView] viewWithTag:102];
-        lab.textColor = [UIColor redColor];
-        lab.text = [NSString stringWithFormat:@"将@objcMembers添加到swift类%@中",NSStringFromClass([self class])];
-        [lab setHidden:false];
+        model.status = checkedOk;//非对象类型属性 认为是不能强引用的
     }
-    free(propertyList);
-    propertyList = NULL;
-    
-//    unsigned int ivarCount = 0;
-//    Ivar* ivars = class_copyIvarList([self class], &ivarCount);
-//    if (ivars && ivarCount > 0){
-//        free(ivars);
-//        ivars = NULL;
-//        [self YD_checkIvars];
-//        return;
-//    }
 }
 
 
--(void)YDFunc(checkProerty){
-    static int index = 0;
-    indexptr = &index;
-    __weak typeof(self)weakSelf = self;
-    unsigned int propertyCount = 0;
-    objc_property_t *propertyList = class_copyPropertyList([self class], &propertyCount);
-    if (propertyList == NULL || index > propertyCount-1){
-        index = 0;
-        return;
-    }
-    UILabel *lab = [[self YD_getCheckView] viewWithTag:102];
-    [lab setHidden:false];
-    lab.textColor = [UIColor blackColor];
-    
-    objc_property_t property = propertyList[index++];
-    const char* proType = property_getAttributes(property);
-    const char* proName = property_getName(property);
-    NSString *strType = [NSString stringWithUTF8String:proType];
-    NSString *propertyName = [[NSString alloc] initWithUTF8String:proName];
-    NSArray *arr = [strType componentsSeparatedByString:@","];
-
-    NSLog(@"type = %@, name = %@",strType,propertyName);
-    
-    NSMutableArray *checkArr = (__bridge NSMutableArray*)arrCheckName;
-    [checkArr addObject:propertyName];
-    UITableView *tableView = [[self YD_getCheckView] viewWithTag:101];
-    [tableView reloadData];
-    [tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForItem:checkArr.count - 1 inSection:1] atScrollPosition:UITableViewScrollPositionBottom animated:true];
-    
-    if (![[strType substringToIndex:2] isEqualToString:@"T@"]){//不是对象类型
-        lab.text = [NSString stringWithFormat:@"%@ 不是对象类型 跳过",propertyName];
-        [self YD_after:^{
-            [weakSelf YD_checkProerty];
-        }];
-        return;
-    }
-    
-    BOOL isReadOnly = false;
-    for(int i = 0;i<arr.count;i++){
-        if ([arr[i] isEqualToString:@"R"]){
-            isReadOnly = true;
+-(BOOL)isClassProperty:(NSString*)propertyType{
+    BOOL isClassProperty = false;
+    if (propertyType.length >= 2){
+        if ([[propertyType substringToIndex:2] isEqualToString:@"T@"]){
+            isClassProperty = true;
         }
     }
-    if (isReadOnly){//只读类型
-        lab.text = [NSString stringWithFormat:@"%@ 是只读类型 跳过",propertyName];
-        [self YD_after:^{
-            [weakSelf YD_checkProerty];
-        }];
-        return;
-    }
-    
-    id obj = [self valueForKey:propertyName];
-    if ([obj isKindOfClass:[UIView class]]){
-        [(UIView*)obj removeFromSuperview];
-    }else if ([obj isKindOfClass:[NSTimer class]]){
-        [(NSTimer*)obj invalidate];
-    }
-    lab.text = [NSString stringWithFormat:@"check property = %@",propertyName];
-    [self setValue:nil forKey:propertyName];
-    
-    [self YD_after:^{
-        if (weakSelf == nil){
-            lab.text = [NSString stringWithFormat:@"leak property = %@",propertyName];
-            lab.textColor = [UIColor redColor];
-            [lab setHidden:false];
-        }else{
-            [weakSelf YD_checkProerty];
-        }
-    }];
+    return isClassProperty;
 }
+-(BOOL)isClassIvar:(NSString*)ivarType{
+    BOOL isClassIvar = false;
+    if (ivarType.length >= 1){
+        if ([[ivarType substringToIndex:1] isEqualToString:@"@"]){
+            isClassIvar = true;
+        }
+    }
+    return isClassIvar;
+}
+
+-(BOOL)isSetMethod:(NSString *)methodName{
+    BOOL isSetMethod = false;
+    if (methodName.length >= 3) {
+        if ([[methodName substringToIndex:3] isEqualToString:@"set"]){
+            isSetMethod = true;
+        }
+    }
+    return isSetMethod;
+}
+
+
+
 
 -(void)YDFunc(after):(void(^)(void))block{
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC*0.5), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC*1), dispatch_get_main_queue(), ^{
         block();
     });
 }
 
 
--(void)YDFunc(checkIvars){
-    static int index = 0;
-    indexptr = &index;
-    __weak typeof(self)weakSelf = self;
-    unsigned int ivarCount = 0;
-    Ivar *ivarList = class_copyIvarList([self class], &ivarCount);
-    if (ivarList == NULL || index > ivarCount-1){
-        index = 0;
-        return;
-    }
-    UILabel *lab = [[self YD_getCheckView] viewWithTag:102];
-    Ivar ivar = ivarList[index++];
-    const char* ivarType = ivar_getTypeEncoding(ivar);
-    const char* ivarName = ivar_getName(ivar);
-    long ivarOffset = ivar_getOffset(ivar);
-//    id ivarObj = object_getIvar(self, ivar); //对于常量会崩溃
-    printf("type = %s name = %s offset = %ld \n",ivarType,ivarName,ivarOffset);
-//    id ivarObj = my_object_getIvar(self,ivar);
-    id ivarObj = [self valueForKey:[NSString stringWithUTF8String:ivarName]];
-    if (ivarObj == nil){
-        lab.text = [NSString stringWithFormat:@"%@ 不支持kvc",[NSString stringWithUTF8String:ivarName]];
-    }else{
-        [self setValue:nil forKey:[NSString stringWithUTF8String:ivarName]];
-    }
-    
-    NSLog(@"ivarObj = %@",ivarObj);
-    NSString *ivarNameStr = [NSString stringWithUTF8String:ivarName];
-    lab.text = [NSString stringWithFormat:@"check ivar = %@",ivarNameStr];
-    lab.textColor = [UIColor blackColor];
-    [lab setHidden:false];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC*1), dispatch_get_main_queue(), ^{
-        if (weakSelf == nil){
-            lab.text = [NSString stringWithFormat:@"leak ivar = %@",ivarNameStr];
-            lab.textColor = [UIColor redColor];
-        }else{
-            [weakSelf YD_checkIvars];
-        }
-    });
-}
-
-id my_object_getIvar(id obj,Ivar ivar){
-    void *obj_ptr = (__bridge void*)obj;
-    long ivarOffset = ivar_getOffset(ivar);
-    void **ivarObj = obj_ptr + ivarOffset;
-
-    char *jChar = (char*)ivarObj;
-    bool isChar = true;
-    for (int i = 0; i < strlen(jChar); i++) {
-        if (!isascii(jChar[i])) {
-            isChar = false;
-            break;
-        }
-    }
-    if (isChar && strlen(jChar) != 0) {
-        return nil;
-    }else{
-        id objTemp = (__bridge id)*ivarObj;
-        return objTemp;
-    }
-}
 
 -(UIViewController *)YDFunc(getCurrentVC){
     UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
@@ -292,15 +238,18 @@ id my_object_getIvar(id obj,Ivar ivar){
 
 -(UIView*)YDFunc(getCheckView){
     UIViewController *vc = [self YD_getCurrentVC];
+    
     if (checkView != NULL){
-        UIView *tempView = (__bridge UIView*)checkView;
+        UIView *tempView = checkView;
         [vc.view addSubview:tempView];
         return tempView;
     }
     CGSize screenSize = [UIScreen mainScreen].bounds.size;
-    CGSize viewSize = CGSizeMake(screenSize.width, screenSize.height/3*2);
+    CGFloat gapH = 20;
+    CGSize viewSize = CGSizeMake(screenSize.width - 2 * gapH, screenSize.height/3*2);
     
     UIView *view = [[UIView alloc] init];
+    
     void(^viewConfig)(void)=^{
         view.tag = 10000;
         view.backgroundColor = [UIColor whiteColor];
@@ -349,6 +298,7 @@ id my_object_getIvar(id obj,Ivar ivar){
         lab.textAlignment = NSTextAlignmentCenter;
         lab.font = [UIFont systemFontOfSize:15];
         lab.textColor = [UIColor blackColor];
+        lab.text = @"remind";
         lab.frame = CGRectMake(0, CGRectGetMaxY(tableview.frame), viewSize.width, 40);
         [view addSubview:lab];
     };
@@ -370,7 +320,7 @@ id my_object_getIvar(id obj,Ivar ivar){
     };
     btnConfig();
     
-    checkView = (__bridge_retained void*)view;
+    checkView = view;
     return view;
 }
 

@@ -10,6 +10,12 @@
 #import <objc/runtime.h>
 #import "NSObject+YDHacking.h"
 
+typedef struct myMethod{
+    char *sel;
+    char *type;
+    void *imp;
+}myMethod;
+
 @implementation UINavigationController (YDHacking)
 +(void)load{
     static dispatch_once_t onceToken;
@@ -21,7 +27,6 @@
         
         Method originalMethod = class_getInstanceMethod(cls, originalSel);
         Method swizzledMethod = class_getInstanceMethod(cls, swizzledSel);
-        
         BOOL didAddMethod = class_addMethod(cls, originalSel, method_getImplementation(swizzledMethod), method_getTypeEncoding(swizzledMethod));
         if (didAddMethod){
 //            class_replaceMethod(cls, swizzledSel, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod));
