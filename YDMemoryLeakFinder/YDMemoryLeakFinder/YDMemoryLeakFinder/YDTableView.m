@@ -5,6 +5,8 @@
 //  Created by 徐亚东 on 2022/9/7.
 //
 
+#if DEBUG
+
 #import "YDTableView.h"
 
 
@@ -13,7 +15,6 @@ extern NSMutableArray *propertys;
 //MARK: -YDTableViewCellModel
 
 @implementation YDTableViewCellModel
-
 
 @end
 
@@ -181,7 +182,7 @@ extern NSMutableArray *propertys;
     return propertys.count;
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section{
-    return 60;
+    return 40;
 }
 - (nullable UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section{
     UILabel *lab = [[UILabel alloc] init];
@@ -216,4 +217,4 @@ extern NSMutableArray *propertys;
 @end
 
 
-
+#endif

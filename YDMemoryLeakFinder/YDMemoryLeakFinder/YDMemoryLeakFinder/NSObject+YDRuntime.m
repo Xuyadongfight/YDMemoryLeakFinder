@@ -5,6 +5,8 @@
 //  Created by 徐亚东 on 2023/8/11.
 //
 
+#if DEBUG
+
 #import "NSObject+YDRuntime.h"
 
 
@@ -85,3 +87,5 @@
 }
 
 @end
+
+#endif

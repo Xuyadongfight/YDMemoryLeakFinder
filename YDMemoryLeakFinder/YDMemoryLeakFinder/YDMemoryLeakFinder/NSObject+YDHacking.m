@@ -5,6 +5,8 @@
 //  Created by 徐亚东 on 2021/6/8.
 //
 
+#if DEBUG
+
 #import "NSObject+YDHacking.h"
 #import <UIKit/UIKit.h>
 #import "YDMemoryLeakManager.h"
@@ -22,7 +24,7 @@ NSMutableArray *propertys;
 @implementation NSObject (YDHacking)
 - (void)YDFunc(willDealloc){
     __weak typeof(self)weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC) , dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC) , dispatch_get_main_queue(), ^{
         [weakSelf YD_HaveLeak];
     });
 }
@@ -139,41 +141,75 @@ NSMutableArray *propertys;
     UITableView* tab = [checkView viewWithTag:101];
     [tab reloadData];
     
-    for (int i = 0; i < models.count;i++){
-        YDTableViewCellModel *model = models[i];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (i + 1) *NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            [self checkProperty:model.name model:model refPropertyNames:proRefNames setMethods:methodSets];
-            [tab reloadData];
-        });
-        
+    void*ptrSelf = (__bridge void*)self;
+    CFIndex preRefCount = CFGetRetainCount(ptrSelf);
+    CFRetain(ptrSelf);
+    CFIndex afterRefCount = CFGetRetainCount(ptrSelf);
+    
+    if(preRefCount < afterRefCount){//可以检测
+        [self checkProperty:models refPropertyNames:proRefNames setMethods:methodSets index:0];
+    }else{
+        UIAlertController *altVC = [UIAlertController alertControllerWithTitle:@"检测失败" message:@"无法转为Core Foundation对象" preferredStyle:UIAlertControllerStyleAlert];
+        [altVC addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleCancel handler:nil]];
+        [[self YD_getCurrentVC] presentViewController:altVC animated:true completion:nil];
+        CFRelease(ptrSelf);
+        ptrSelf = NULL;
     }
+
 }
 
--(void)checkProperty:(NSString *)propertyName model:(YDTableViewCellModel*)model refPropertyNames:(NSArray*)refNames setMethods:(NSArray*)setMethods{
-    if ([refNames containsObject:propertyName]) {//是对象类型
+-(void)checkProperty:(NSArray*)models refPropertyNames:(NSArray*)refNames setMethods:(NSArray*)setMethods index:(int)index{
+    void*ptrSelf = (__bridge void*)self;
+    
+    UITableView* tab = [checkView viewWithTag:101];
+    [tab reloadData];
+    if (index >= models.count) {
+        CFRelease(ptrSelf);
+        return;
+    }
+    
+    YDTableViewCellModel* model = models[index];
+    __weak typeof(self)weakSelf = self;
+    if ([refNames containsObject:model.name]) {//是对象类型
         NSString *setMethodName = [NSString stringWithFormat:@"set%@%@:",[model.name substringToIndex:1].uppercaseString,[model.name substringFromIndex:1]];
         if ([setMethods containsObject:setMethodName]) {//有set方法
-            __weak id property = [self valueForKey:propertyName];
+            __weak id property = [self valueForKey:model.name];
             
-            CFIndex countPre = CFGetRetainCount((__bridge void*)self);
-            if ([property isKindOfClass:[NSTimer class]]) {//对定时器做特殊处理
-                [(NSTimer*)property invalidate];
-            }
-            [self setValue:nil forKey:model.name];
-            CFIndex countAfter = CFGetRetainCount((__bridge void*)self);
-//            NSLog(@"name = %@ pre = %ld after = %ld",propertyName,countPre,countAfter);
-            if (countPre == countAfter) {
-                model.status = checkedOk;
-            }else{
-                model.status = checkError;
-            }
+
+            
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                
+                CFIndex countPre = CFGetRetainCount(ptrSelf);
+                if ([property isKindOfClass:[NSTimer class]]) {//对定时器做特殊处理
+                    [(NSTimer*)property invalidate];
+                }
+                if ([property isKindOfClass:[CADisplayLink class]]) {
+                    [(CADisplayLink*)property invalidate];//对CADisplayLink做特殊处理
+                }
+                [weakSelf setValue:nil forKey:model.name];
+                
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                    CFIndex countAfter = CFGetRetainCount(ptrSelf);
+                    NSLog(@"name = %@ pre = %ld after = %ld",model.name,countPre,countAfter);
+                    if (countPre == countAfter) {
+                        model.status = checkedOk;
+                    }else{
+                        model.status = checkError;
+                    }
+                    [weakSelf checkProperty:models refPropertyNames:refNames setMethods:setMethods index:index + 1];
+                });
+            });
         }else{
             model.status = checkedOk; //没有set方法认为是不能强引用的
+            [weakSelf checkProperty:models refPropertyNames:refNames setMethods:setMethods index:index + 1];
         }
     }else{
         model.status = checkedOk;//非对象类型属性 认为是不能强引用的
+        [weakSelf checkProperty:models refPropertyNames:refNames setMethods:setMethods index:index + 1];
     }
+    
 }
+
 
 
 -(BOOL)isClassProperty:(NSString*)propertyType{
@@ -206,16 +242,6 @@ NSMutableArray *propertys;
 }
 
 
-
-
--(void)YDFunc(after):(void(^)(void))block{
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC*1), dispatch_get_main_queue(), ^{
-        block();
-    });
-}
-
-
-
 -(UIViewController *)YDFunc(getCurrentVC){
     UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
     loop:
@@ -234,7 +260,7 @@ NSMutableArray *propertys;
     return rootVC;
 }
 
-#pragma mark -checkview
+//MARK: -checkview
 
 -(UIView*)YDFunc(getCheckView){
     UIViewController *vc = [self YD_getCurrentVC];
@@ -269,10 +295,10 @@ NSMutableArray *propertys;
         lab.backgroundColor = [UIColor colorWithWhite:0.9 alpha:1];
         lab.numberOfLines = 0;
         lab.textAlignment = NSTextAlignmentCenter;
-        lab.text = @"检测swift类 需要添加@objcMembers";
+        lab.text = @"检测swift类 需要添加@objcMembers,并且属性的访问控制范围不能是private或者fileprivate，否则访问不到对应的属性";
         lab.font = [UIFont systemFontOfSize:15];
         lab.textColor = [UIColor redColor];
-        lab.frame = CGRectMake(0,0, viewSize.width, 40);
+        lab.frame = CGRectMake(0,0, viewSize.width, 60);
         [view addSubview:lab];
     };
     labTitleConfig();
@@ -325,3 +351,5 @@ NSMutableArray *propertys;
 }
 
 @end
+
+#endif

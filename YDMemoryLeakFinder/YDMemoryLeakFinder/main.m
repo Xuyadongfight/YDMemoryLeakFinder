@@ -8,7 +8,6 @@
 #import <UIKit/UIKit.h>
 #import "AppDelegate.h"
 #import <dlfcn.h>
-#import "Person.h"
 #import <pthread.h>
 
 

@@ -4,6 +4,7 @@
 //
 //  Created by 徐亚东 on 2021/6/8.
 //
+#if DEBUG
 
 #import "YDMemoryLeakManager.h"
 
@@ -18,3 +19,5 @@
     return __shared;
 }
 @end
+
+#endif
